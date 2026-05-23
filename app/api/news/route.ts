@@ -15,7 +15,9 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Server misconfiguration: CRON_SECRET not set" }, { status: 500 });
   }
 
-  const secret = req.headers.get("x-cron-secret") ?? req.headers.get("x-vercel-cron-secret");
+  const authHeader = req.headers.get("authorization");
+  const bearerToken = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
+  const secret = req.headers.get("x-cron-secret") ?? bearerToken;
   if (secret !== expectedSecret) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
