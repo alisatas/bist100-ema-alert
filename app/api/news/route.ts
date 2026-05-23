@@ -8,7 +8,6 @@ BIST ve Türk ekonomisi odaklı düşünürsün.
 Yanıtlarını her zaman Türkçe ve kısa yaz.`;
 
 export async function GET(req: NextRequest) {
-  // Security: CRON_SECRET must always be set in production
   const expectedSecret = process.env.CRON_SECRET;
   if (!expectedSecret) {
     console.error("CRON_SECRET env variable is not set — endpoint is unprotected!");
@@ -28,21 +27,21 @@ export async function GET(req: NextRequest) {
     year: "numeric",
   });
 
-  // 1. Haber başlıklarını çek
-  const headlines = await fetchNewsHeadlines();
+  const items = await fetchNewsHeadlines();
 
-  if (headlines.length === 0) {
-    const msg = `📰 <b>Sabah Haber Bülteni</b> — ${date}\n\nHaber kaynakları şu an erişilemiyor.`;
-    await sendMessage(msg);
-    return NextResponse.json({ sent: true, headlines: 0 });
+  if (items.length === 0) {
+    await sendMessage(`📰 <b>Sabah Haber Bülteni</b> — ${date}\n\nHaber kaynakları şu an erişilemiyor.`);
+    return NextResponse.json({ sent: true, headlinesFetched: 0 });
   }
 
-  // 2. Claude ile en önemli 3-4 haberi seç ve analiz et
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-  const userPrompt = `Bugünkü Türk finans haber başlıkları (${headlines.length} haber):
+  // Send only titles to Claude for analysis
+  const titlesForClaude = items.slice(0, 60).map((item, i) => `${i + 1}. ${item.title}`).join("\n");
 
-${headlines.slice(0, 60).join("\n")}
+  const userPrompt = `Bugünkü Türk finans haber başlıkları (${items.length} haber):
+
+${titlesForClaude}
 
 Görevin:
 - BIST ve Türk ekonomisi açısından bugün en kritik 3-4 haberi seç
@@ -70,13 +69,23 @@ Görevin:
     analysis = "Haber analizi şu an yapılamıyor.";
   }
 
-  const fullMessage = `📰 <b>Sabah Haber Bülteni</b> — ${date}\n🔍 <i>${headlines.length} haber tarandı, en önemlileri:</i>\n\n${analysis}`;
+  // Build links section — top items that have a URL
+  const withLinks = items.slice(0, 20).filter((item) => item.url.startsWith("http"));
+  const linksSection = withLinks.slice(0, 8)
+    .map((item) => `• <a href="${item.url}">${item.source}: ${item.title.slice(0, 60)}${item.title.length > 60 ? "…" : ""}</a>`)
+    .join("\n");
+
+  const fullMessage = [
+    `📰 <b>Sabah Haber Bülteni</b> — ${date}`,
+    `🔍 <i>${items.length} haber tarandı, en önemlileri:</i>`,
+    "",
+    analysis,
+    "",
+    "🔗 <b>Haberler:</b>",
+    linksSection,
+  ].join("\n");
 
   const sent = await sendMessage(fullMessage);
 
-  return NextResponse.json({
-    date,
-    headlinesFetched: headlines.length,
-    sent,
-  });
+  return NextResponse.json({ date, headlinesFetched: items.length, sent });
 }

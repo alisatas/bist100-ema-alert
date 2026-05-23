@@ -13,20 +13,26 @@ interface MacroQuote {
   prevClose: number;
   pct: number;
   unit: string;
+  group: string;
 }
 
 const INSTRUMENTS = [
   // Kur
-  { symbol: "USDTRY=X", label: "USD/TRY", unit: "₺" },
-  { symbol: "EURTRY=X", label: "EUR/TRY", unit: "₺" },
+  { symbol: "USDTRY=X", label: "USD/TRY", unit: "₺", group: "kur" },
+  { symbol: "EURTRY=X", label: "EUR/TRY", unit: "₺", group: "kur" },
   // Emtia
-  { symbol: "GC=F", label: "Altın", unit: "$" },
-  { symbol: "BZ=F", label: "Brent Petrol", unit: "$" },
+  { symbol: "GC=F",  label: "Altın",       unit: "$", group: "emtia" },
+  { symbol: "SI=F",  label: "Gümüş",       unit: "$", group: "emtia" },
+  { symbol: "BZ=F",  label: "Brent Petrol", unit: "$", group: "emtia" },
+  { symbol: "NG=F",  label: "Doğalgaz",    unit: "$", group: "emtia" },
+  // Kripto
+  { symbol: "BTC-USD", label: "Bitcoin",  unit: "$", group: "kripto" },
+  { symbol: "ETH-USD", label: "Ethereum", unit: "$", group: "kripto" },
   // Endeksler
-  { symbol: "XU100.IS", label: "BIST 100", unit: "" },
-  { symbol: "ES=F", label: "S&P 500 Vad.", unit: "" },
-  { symbol: "^VIX", label: "VIX", unit: "" },
-  { symbol: "^GDAXI", label: "DAX", unit: "" },
+  { symbol: "XU100.IS", label: "BIST 100",    unit: "",  group: "endeks" },
+  { symbol: "ES=F",     label: "S&P 500 Vad.", unit: "",  group: "endeks" },
+  { symbol: "^VIX",     label: "VIX",          unit: "",  group: "endeks" },
+  { symbol: "^GDAXI",   label: "DAX",          unit: "",  group: "endeks" },
 ] as const;
 
 async function fetchQuote(symbol: string): Promise<{ price: number; prevClose: number } | null> {
@@ -37,11 +43,9 @@ async function fetchQuote(symbol: string): Promise<{ price: number; prevClose: n
       cache: "no-store",
     });
     if (!res.ok) return null;
-
     const data = await res.json();
     const meta = data?.chart?.result?.[0]?.meta;
     if (!meta) return null;
-
     return {
       price: meta.regularMarketPrice,
       prevClose: meta.chartPreviousClose ?? meta.regularMarketPrice,
@@ -58,51 +62,52 @@ function arrow(pct: number): string {
   return "🔽";
 }
 
-function fmt(price: number, unit: string): string {
+function fmt(price: number, unit: string, group: string): string {
+  if (group === "kripto") {
+    return `${unit}${price.toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
+  }
   if (price >= 10000) return `${unit}${price.toLocaleString("tr-TR", { maximumFractionDigits: 0 })}`;
-  if (price >= 100) return `${unit}${price.toFixed(2)}`;
+  if (price >= 100)   return `${unit}${price.toFixed(2)}`;
   return `${unit}${price.toFixed(4)}`;
 }
 
+function pctStr(pct: number): string {
+  return `${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%`;
+}
+
 export async function buildMacroBrief(date: string): Promise<string> {
-  const results = await Promise.all(
-    INSTRUMENTS.map(async ({ symbol, label, unit }) => {
+  const quotes = await Promise.all(
+    INSTRUMENTS.map(async ({ symbol, label, unit, group }) => {
       const q = await fetchQuote(symbol);
       if (!q) return null;
       const pct = ((q.price - q.prevClose) / q.prevClose) * 100;
-      return { label, symbol, price: q.price, prevClose: q.prevClose, pct, unit } as MacroQuote;
+      return { label, symbol, price: q.price, prevClose: q.prevClose, pct, unit, group } as MacroQuote;
     })
   );
 
-  const lines: string[] = [
-    `🌅 <b>Sabah Brifing</b> — ${date}`,
-    "",
-    "💱 <b>Kurlar</b>",
+  const byGroup = (g: string) => quotes.filter((q): q is MacroQuote => q?.group === g);
+
+  const lines: string[] = [`🌅 <b>Sabah Brifing</b> — ${date}`, ""];
+
+  const sections: Array<{ title: string; group: string; isIndex?: boolean }> = [
+    { title: "💱 Kurlar",    group: "kur" },
+    { title: "🪙 Emtia",     group: "emtia" },
+    { title: "₿ Kripto",     group: "kripto" },
+    { title: "📈 Endeksler", group: "endeks", isIndex: true },
   ];
 
-  const kurlar = results.slice(0, 2);
-  const emtia = results.slice(2, 4);
-  const endeksler = results.slice(4);
-
-  for (const q of kurlar) {
-    if (!q) continue;
-    lines.push(`${arrow(q.pct)} ${q.label}: ${fmt(q.price, q.unit)} (${q.pct >= 0 ? "+" : ""}${q.pct.toFixed(2)}%)`);
+  for (const { title, group, isIndex } of sections) {
+    lines.push(`<b>${title}</b>`);
+    for (const q of byGroup(group)) {
+      if (isIndex && !q.unit) {
+        const priceStr = q.price.toLocaleString("tr-TR", { maximumFractionDigits: 2 });
+        lines.push(`${arrow(q.pct)} ${q.label}: ${priceStr} (${pctStr(q.pct)})`);
+      } else {
+        lines.push(`${arrow(q.pct)} ${q.label}: ${fmt(q.price, q.unit, group)} (${pctStr(q.pct)})`);
+      }
+    }
+    lines.push("");
   }
 
-  lines.push("", "🪙 <b>Emtia</b>");
-  for (const q of emtia) {
-    if (!q) continue;
-    lines.push(`${arrow(q.pct)} ${q.label}: ${fmt(q.price, q.unit)} (${q.pct >= 0 ? "+" : ""}${q.pct.toFixed(2)}%)`);
-  }
-
-  lines.push("", "📈 <b>Endeksler</b>");
-  for (const q of endeksler) {
-    if (!q) continue;
-    const priceStr = q.unit
-      ? `${q.unit}${q.price.toFixed(2)}`
-      : q.price.toLocaleString("tr-TR", { maximumFractionDigits: 2 });
-    lines.push(`${arrow(q.pct)} ${q.label}: ${priceStr} (${q.pct >= 0 ? "+" : ""}${q.pct.toFixed(2)}%)`);
-  }
-
-  return lines.join("\n");
+  return lines.join("\n").trimEnd();
 }
