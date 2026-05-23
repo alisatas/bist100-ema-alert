@@ -30,11 +30,11 @@ Yanıt: sadece virgülle ayrılmış sayılar. Örnek: 2,5,11,23`,
 }
 
 async function analyzeForCEO(items: NewsItem[], date: string): Promise<string> {
-  const headlines = items.slice(0, 6).map((item, i) => `${i + 1}. [${item.source}] ${item.title}`).join("\n");
+  const headlines = items.slice(0, 8).map((item, i) => `${i + 1}. [${item.source}] ${item.title}`).join("\n");
 
   const msg = await client.messages.create({
     model: "claude-sonnet-4-6",
-    max_tokens: 1200,
+    max_tokens: 1600,
     system: `Kıdemli portföy yöneticisisin. CEO'ya sabah piyasa özeti raporu hazırlarsın.
 Üslup: net, kısa, aksiyon odaklı. Gereksiz giriş yok.`,
     messages: [{
