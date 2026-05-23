@@ -4,7 +4,7 @@ import { getHistoricalCloses, getCurrentPrice } from "@/lib/yahoo";
 import { getEMA200, pctDiff } from "@/lib/ema";
 import { sendMessage } from "@/lib/telegram";
 import { buildMacroBrief } from "@/lib/macro";
-import { buildNewsBrief } from "@/lib/ai-brief";
+// Haberler artık /api/news endpoint'i tarafından 10:30'da ayrıca gönderiliyor
 
 const BATCH_SIZE = 5;
 const BATCH_DELAY_MS = 300;
@@ -56,12 +56,16 @@ function formatAlert(above: StockResult[], below: StockResult[], date: string): 
 }
 
 export async function GET(req: NextRequest) {
-  // Verify cron secret (both Vercel's header and custom header)
-  const secret = req.headers.get("x-cron-secret");
-  const vercelCron = req.headers.get("x-vercel-cron-secret");
+  // Security: CRON_SECRET must always be set in production
   const expectedSecret = process.env.CRON_SECRET;
+  if (!expectedSecret) {
+    console.error("CRON_SECRET env variable is not set — endpoint is unprotected!");
+    return NextResponse.json({ error: "Server misconfiguration: CRON_SECRET not set" }, { status: 500 });
+  }
 
-  if (expectedSecret && secret !== expectedSecret && vercelCron !== expectedSecret) {
+  // Accept Vercel's built-in cron header OR a custom x-cron-secret header
+  const secret = req.headers.get("x-cron-secret") ?? req.headers.get("x-vercel-cron-secret");
+  if (secret !== expectedSecret) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -71,15 +75,12 @@ export async function GET(req: NextRequest) {
     year: "numeric",
   });
 
-  // 1. Sabah brifing — makro + global piyasalar
+  // 1. Sabah brifing — makro + global piyasalar (10:00 TR)
   const macroBrief = await buildMacroBrief(date);
   await sendMessage(macroBrief);
 
-  // 2. Piyasa haberleri — Claude AI analizi (RSS + Anthropic)
-  const newsBrief = await buildNewsBrief(date);
-  await sendMessage(newsBrief);
-
-  // 3. BIST 100 EMA 200 taraması
+  // 2. BIST 100 EMA 200 taraması (10:00 TR)
+  // Not: Haber bülteni /api/news tarafından 10:30'da ayrıca gönderilir
   const results: StockResult[] = [];
   const errors: string[] = [];
 

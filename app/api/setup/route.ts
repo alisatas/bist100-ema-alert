@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
 const BASE = `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}`;
 
@@ -7,8 +7,17 @@ interface TelegramUpdate {
 }
 
 // Temporarily removes webhook, fetches updates to get chat_id, then restores webhook.
-// Visit once after sending /start to your bot.
-export async function GET() {
+// Visit once after sending /start to your bot. Requires SETUP_SECRET header.
+export async function GET(req: NextRequest) {
+  // Security: protect setup endpoint with a secret
+  const expectedSecret = process.env.SETUP_SECRET ?? process.env.CRON_SECRET;
+  if (!expectedSecret) {
+    return NextResponse.json({ error: "Server misconfiguration: SETUP_SECRET not set" }, { status: 500 });
+  }
+  const provided = req.headers.get("x-setup-secret") ?? req.nextUrl.searchParams.get("secret");
+  if (provided !== expectedSecret) {
+    return NextResponse.json({ error: "Unauthorized — pass ?secret=<SETUP_SECRET> or x-setup-secret header" }, { status: 401 });
+  }
   // 1. Get current webhook URL so we can restore it
   const webhookInfo = await fetch(`${BASE}/getWebhookInfo`).then((r) => r.json()) as {
     ok: boolean;

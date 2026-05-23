@@ -1,8 +1,14 @@
+// En çok okunan/dinlenen Türk finans haber kaynakları (RSS)
 const RSS_FEEDS = [
   { url: "https://www.bloomberght.com/rss", name: "Bloomberg HT" },
   { url: "https://www.dunya.com/rss", name: "Dünya Gazetesi" },
   { url: "https://tr.investing.com/rss/news.rss", name: "Investing.com TR" },
   { url: "https://www.aa.com.tr/tr/rss/default?cat=ekonomi", name: "AA Ekonomi" },
+  { url: "https://www.hurriyet.com.tr/rss/ekonomi", name: "Hürriyet Ekonomi" },
+  { url: "https://www.sabah.com.tr/rss/ekonomi.xml", name: "Sabah Ekonomi" },
+  { url: "https://www.milliyet.com.tr/rss/rssnew/ekonomirss.xml", name: "Milliyet Ekonomi" },
+  { url: "https://www.haberturk.com/rss/ekonomi.xml", name: "Habertürk Ekonomi" },
+  { url: "https://ekonomi.haber7.com/rss.asp", name: "Haber7 Ekonomi" },
   // Mynet 403 döndüğü için çıkarıldı
 ];
 
