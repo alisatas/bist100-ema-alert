@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { BIST100 } from "@/lib/bist100";
-import { getHistoricalCloses, getCurrentPrice } from "@/lib/yahoo";
+import { getWeeklyCloses, getCurrentPrice } from "@/lib/yahoo";
 import { getEMA200, pctDiff } from "@/lib/ema";
 import { sendMessage } from "@/lib/telegram";
 import { buildMacroBrief } from "@/lib/macro";
@@ -24,8 +24,8 @@ interface StockResult {
 
 function formatAlert(above: StockResult[], below: StockResult[], date: string): string {
   const lines: string[] = [
-    `📊 <b>BIST 100 EMA 200 Taraması</b> — ${date}`,
-    `🎯 EMA 200'e Dokunan Hisseler (±%${TOUCH_THRESHOLD_PCT})`,
+    `📊 <b>BIST 100 Haftalık EMA 200 Taraması</b> — ${date}`,
+    `🎯 Haftalık EMA 200'e Dokunan Hisseler (±%${TOUCH_THRESHOLD_PCT})`,
     "",
   ];
 
@@ -98,7 +98,7 @@ export async function GET(req: NextRequest) {
 
     await Promise.all(
       unique.map(async ({ symbol, name }) => {
-        const closes = await getHistoricalCloses(symbol, 260);
+        const closes = await getWeeklyCloses(symbol, 250);
         if (closes.length < 200) {
           errors.push(`${symbol}: yetersiz veri (${closes.length} gün)`);
           return;
@@ -134,7 +134,7 @@ export async function GET(req: NextRequest) {
     const msg = formatAlert(above, below, date);
     messageSent = await sendMessage(msg);
   } else {
-    await sendMessage(`📊 BIST 100 EMA 200 Taraması — ${date}\n\nBugün EMA 200'e dokunan hisse bulunamadı.`);
+    await sendMessage(`📊 BIST 100 Haftalık EMA 200 Taraması — ${date}\n\nBugün Haftalık EMA 200'e dokunan hisse bulunamadı.`);
     messageSent = true;
   }
 

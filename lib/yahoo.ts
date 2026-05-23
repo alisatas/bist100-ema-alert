@@ -19,10 +19,17 @@ interface YahooChartResult {
   };
 }
 
-async function fetchChart(symbol: string, range: string): Promise<YahooChartResult | null> {
+async function fetchChart(
+  symbol: string,
+  interval: "1d" | "1wk",
+  range: string
+): Promise<YahooChartResult | null> {
   try {
-    const url = `${BASE}/${encodeURIComponent(symbol)}?interval=1d&range=${range}`;
-    const res = await fetch(url, { headers: { ...HEADERS, Referer: `https://finance.yahoo.com/quote/${symbol}/` }, cache: "no-store" });
+    const url = `${BASE}/${encodeURIComponent(symbol)}?interval=${interval}&range=${range}`;
+    const res = await fetch(url, {
+      headers: { ...HEADERS, Referer: `https://finance.yahoo.com/quote/${symbol}/` },
+      cache: "no-store",
+    });
     if (!res.ok) return null;
     return res.json();
   } catch {
@@ -30,17 +37,14 @@ async function fetchChart(symbol: string, range: string): Promise<YahooChartResu
   }
 }
 
-export async function getHistoricalCloses(
-  symbol: string,
-  days = 260
-): Promise<number[]> {
+export async function getWeeklyCloses(symbol: string, weeks = 250): Promise<number[]> {
   try {
-    const data = await fetchChart(symbol, "1y");
+    const data = await fetchChart(symbol, "1wk", "5y");
     const result = data?.chart.result?.[0];
     if (!result) return [];
     return result.indicators.quote[0].close
       .filter((c): c is number => c != null)
-      .slice(-days);
+      .slice(-weeks);
   } catch {
     return [];
   }
@@ -48,7 +52,7 @@ export async function getHistoricalCloses(
 
 export async function getCurrentPrice(symbol: string): Promise<number | null> {
   try {
-    const data = await fetchChart(symbol, "5d");
+    const data = await fetchChart(symbol, "1d", "5d");
     const result = data?.chart.result?.[0];
     return result?.meta.regularMarketPrice ?? null;
   } catch {
