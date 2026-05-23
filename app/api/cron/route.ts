@@ -4,6 +4,7 @@ import { getHistoricalCloses, getCurrentPrice } from "@/lib/yahoo";
 import { getEMA200, pctDiff } from "@/lib/ema";
 import { sendMessage } from "@/lib/telegram";
 import { buildMacroBrief } from "@/lib/macro";
+import { buildNewsBrief } from "@/lib/ai-brief";
 
 const BATCH_SIZE = 5;
 const BATCH_DELAY_MS = 300;
@@ -74,7 +75,11 @@ export async function GET(req: NextRequest) {
   const macroBrief = await buildMacroBrief(date);
   await sendMessage(macroBrief);
 
-  // 2. BIST 100 EMA 200 taraması
+  // 2. Piyasa haberleri — Claude AI analizi (RSS + Anthropic)
+  const newsBrief = await buildNewsBrief(date);
+  await sendMessage(newsBrief);
+
+  // 3. BIST 100 EMA 200 taraması
   const results: StockResult[] = [];
   const errors: string[] = [];
 
