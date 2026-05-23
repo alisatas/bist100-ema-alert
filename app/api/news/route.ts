@@ -1,16 +1,64 @@
 import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
-import { fetchNewsHeadlines } from "@/lib/news";
+import { fetchNewsHeadlines, type NewsItem } from "@/lib/news";
 import { sendMessage } from "@/lib/telegram";
 
-const SYSTEM_PROMPT = `Sen deneyimli bir Türk finans analistisin.
-BIST ve Türk ekonomisi odaklı düşünürsün.
-Yanıtlarını her zaman Türkçe ve kısa yaz.`;
+const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+
+// ── Agent Step 1: Filter ──────────────────────────────────────────────────────
+// Returns indices (1-based) of headlines that are relevant to stocks/markets
+async function filterRelevantNews(items: NewsItem[]): Promise<number[]> {
+  const numbered = items.slice(0, 80).map((item, i) => `${i + 1}. ${item.title}`).join("\n");
+
+  const msg = await client.messages.create({
+    model: "claude-sonnet-4-6",
+    max_tokens: 300,
+    system: `Sen BIST ve Türk piyasaları uzmanı bir analistsin.
+Görevin: Verilen haber listesinden YALNIZCA aşağıdakilerle ilgili haberlerin numaralarını seç:
+- BIST'te işlem gören şirketler (kazanç, yönetim değişikliği, birleşme, ihracat, üretim)
+- Bankacılık, enerji, sanayi, perakende, teknoloji sektör haberleri
+- TCMB kararları, enflasyon, faiz, döviz politikası
+- Uluslararası ticaret, hammadde fiyatları, emtia (piyasaya etkisi olan)
+- Büyük şirket haberleri (Ford, Sabancı, Koç, Eczacıbaşı, Türk Telekom vb.)
+
+REDDET: Spor, eğlence, siyasi tartışma, suç, hava durumu, sosyal medya haberleri.
+
+Yanıt olarak SADECE virgülle ayrılmış sayılar yaz. Örnek: 2,5,11,23,31`,
+    messages: [{ role: "user", content: `Haber listesi:\n${numbered}\n\nFinans/piyasa haberi olan numaralar:` }],
+  });
+
+  const text = msg.content[0].type === "text" ? msg.content[0].text.trim() : "";
+  return text
+    .split(",")
+    .map((s) => parseInt(s.trim(), 10))
+    .filter((n) => !isNaN(n) && n >= 1 && n <= items.length);
+}
+
+// ── Agent Step 2: Analyze ─────────────────────────────────────────────────────
+// CEO-level deep analysis of filtered headlines
+async function analyzeForCEO(items: NewsItem[], date: string): Promise<string> {
+  const headlines = items.map((item, i) => `${i + 1}. [${item.source}] ${item.title}`).join("\n");
+
+  const msg = await client.messages.create({
+    model: "claude-sonnet-4-6",
+    max_tokens: 2000,
+    system: `Sen kıdemli bir portföy yöneticisisin. Her sabah CEO'ya piyasa özeti raporu hazırlarsın.
+Raporun üslubu: net, kısa, aksiyon odaklı. Gereksiz giriş cümlesi yok.
+Her haber için şu soruları yanıtla: Ne oldu? Hangi hisseler etkilenir? Yatırımcı ne yapmalı?`,
+    messages: [{
+      role: "user",
+      content: `Bugün (${date}) piyasayla ilgili seçilmiş haberler:\n\n${headlines}\n\nCEO raporu hazırla. Şu formatı kullan:\n\n📌 <b>[Haber başlığı]</b>\n📝 <i>Durum:</i> [Ne oldu, 1-2 cümle]\n📊 <i>Etkilenen hisseler/sektörler:</i> [spesifik hisse veya sektör adları]\n⚡ <i>Aksiyon:</i> 🟢 Fırsat / 🔴 Risk / 🟡 İzle — [1 cümle]\n\n(sonraki haber için boş satır bırak)`,
+    }],
+  });
+
+  return msg.content[0].type === "text" ? msg.content[0].text : "";
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 export async function GET(req: NextRequest) {
   const expectedSecret = process.env.CRON_SECRET;
   if (!expectedSecret) {
-    console.error("CRON_SECRET env variable is not set — endpoint is unprotected!");
     return NextResponse.json({ error: "Server misconfiguration: CRON_SECRET not set" }, { status: 500 });
   }
 
@@ -27,65 +75,54 @@ export async function GET(req: NextRequest) {
     year: "numeric",
   });
 
-  const items = await fetchNewsHeadlines();
+  const allItems = await fetchNewsHeadlines();
 
-  if (items.length === 0) {
+  if (allItems.length === 0) {
     await sendMessage(`📰 <b>Sabah Haber Bülteni</b> — ${date}\n\nHaber kaynakları şu an erişilemiyor.`);
     return NextResponse.json({ sent: true, headlinesFetched: 0 });
   }
 
-  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-
-  // Send only titles to Claude for analysis
-  const titlesForClaude = items.slice(0, 60).map((item, i) => `${i + 1}. ${item.title}`).join("\n");
-
-  const userPrompt = `Bugünkü Türk finans haber başlıkları (${items.length} haber):
-
-${titlesForClaude}
-
-Görevin:
-- BIST ve Türk ekonomisi açısından bugün en kritik 3-4 haberi seç
-- Her haber için 2-3 cümlelik Türkçe özet yaz
-- Yatırımcıya olası piyasa etkisini belirt
-
-Çıktı formatı (başka hiçbir şey yazma, sadece bu format):
-📌 <b>[Haber başlığı]</b>
-📝 <i>Özet:</i> [2-3 cümle]
-📊 <i>Etki:</i> 🟢 Olumlu / 🔴 Olumsuz / 🟡 Nötr — [kısa açıklama]
-
-(sonraki haber için boş satır bırak)`;
-
-  let analysis = "";
   try {
-    const msg = await client.messages.create({
-      model: "claude-sonnet-4-6",
-      max_tokens: 1500,
-      system: SYSTEM_PROMPT,
-      messages: [{ role: "user", content: userPrompt }],
+    // Step 1 — Filter: find market-relevant headlines
+    const relevantIndices = await filterRelevantNews(allItems);
+    const relevantItems = relevantIndices.map((i) => allItems[i - 1]).filter(Boolean);
+
+    if (relevantItems.length === 0) {
+      await sendMessage(`📰 <b>Sabah Haber Bülteni</b> — ${date}\n\nBugün piyasayla doğrudan ilgili haber bulunamadı.`);
+      return NextResponse.json({ sent: true, headlinesFetched: allItems.length, relevant: 0 });
+    }
+
+    // Step 2 — Analyze: CEO-level report
+    const analysis = await analyzeForCEO(relevantItems, date);
+
+    // Links — only relevant items with valid URLs
+    const links = relevantItems
+      .filter((item) => item.url.startsWith("http"))
+      .slice(0, 8)
+      .map((item) => `• <a href="${item.url}">[${item.source}] ${item.title.slice(0, 55)}${item.title.length > 55 ? "…" : ""}</a>`)
+      .join("\n");
+
+    const fullMessage = [
+      `📰 <b>Sabah Haber Bülteni</b> — ${date}`,
+      `🔍 <i>${allItems.length} haber tarandı → ${relevantItems.length} piyasa haberi seçildi</i>`,
+      "",
+      analysis,
+      "",
+      "🔗 <b>Kaynaklar:</b>",
+      links || "(link mevcut değil)",
+    ].join("\n");
+
+    const sent = await sendMessage(fullMessage);
+
+    return NextResponse.json({
+      date,
+      headlinesFetched: allItems.length,
+      relevant: relevantItems.length,
+      sent,
     });
-    analysis = msg.content[0].type === "text" ? msg.content[0].text : "";
   } catch (err) {
-    console.error("Claude API error:", err);
-    analysis = "Haber analizi şu an yapılamıyor.";
+    console.error("Agent error:", err);
+    await sendMessage(`📰 <b>Sabah Haber Bülteni</b> — ${date}\n\nHaber analizi şu an yapılamıyor.`);
+    return NextResponse.json({ error: String(err) }, { status: 500 });
   }
-
-  // Build links section — top items that have a URL
-  const withLinks = items.slice(0, 20).filter((item) => item.url.startsWith("http"));
-  const linksSection = withLinks.slice(0, 8)
-    .map((item) => `• <a href="${item.url}">${item.source}: ${item.title.slice(0, 60)}${item.title.length > 60 ? "…" : ""}</a>`)
-    .join("\n");
-
-  const fullMessage = [
-    `📰 <b>Sabah Haber Bülteni</b> — ${date}`,
-    `🔍 <i>${items.length} haber tarandı, en önemlileri:</i>`,
-    "",
-    analysis,
-    "",
-    "🔗 <b>Haberler:</b>",
-    linksSection,
-  ].join("\n");
-
-  const sent = await sendMessage(fullMessage);
-
-  return NextResponse.json({ date, headlinesFetched: items.length, sent });
 }
