@@ -3,6 +3,7 @@ import { BIST100 } from "@/lib/bist100";
 import { getHistoricalCloses, getCurrentPrice } from "@/lib/yahoo";
 import { getEMA200, pctDiff } from "@/lib/ema";
 import { sendMessage } from "@/lib/telegram";
+import { buildMacroBrief } from "@/lib/macro";
 
 const BATCH_SIZE = 5;
 const BATCH_DELAY_MS = 300;
@@ -63,6 +64,17 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  const date = new Date().toLocaleDateString("tr-TR", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
+
+  // 1. Sabah brifing — makro + global piyasalar
+  const macroBrief = await buildMacroBrief(date);
+  await sendMessage(macroBrief);
+
+  // 2. BIST 100 EMA 200 taraması
   const results: StockResult[] = [];
   const errors: string[] = [];
 
@@ -107,12 +119,6 @@ export async function GET(req: NextRequest) {
   results.sort((a, b) => a.pct - b.pct);
   const above = results.filter((s) => s.pct >= 0);
   const below = results.filter((s) => s.pct < 0);
-
-  const date = new Date().toLocaleDateString("tr-TR", {
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-  });
 
   let messageSent = false;
   if (results.length > 0) {
