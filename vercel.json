@@ -6,7 +6,7 @@
     },
     {
       "path": "/api/news",
-      "schedule": "10 17 * * *"
+      "schedule": "25 17 * * *"
     }
   ],
   "functions": {
