@@ -28,22 +28,22 @@ function formatAlert(above: StockResult[], below: StockResult[], date: string): 
   ];
 
   if (above.length > 0) {
-    lines.push("🔼 <b>EMA Üstünde:</b>");
+    lines.push("🔼 <b>EMA 200 Üstünde Olanlar:</b>");
     for (const s of above) {
       lines.push(
         `• <b>${s.symbol.replace(".IS", "")}</b> — ${s.price.toFixed(2)} ₺` +
-          ` (EMA: ${s.ema200.toFixed(2)} ₺, +${s.pct.toFixed(2)}%)`
+          ` (EMA 200: ${s.ema200.toFixed(2)} ₺, +${s.pct.toFixed(2)}%)`
       );
     }
     lines.push("");
   }
 
   if (below.length > 0) {
-    lines.push("🔽 <b>EMA Altında:</b>");
+    lines.push("🔽 <b>EMA 200 Altında Olanlar:</b>");
     for (const s of below) {
       lines.push(
         `• <b>${s.symbol.replace(".IS", "")}</b> — ${s.price.toFixed(2)} ₺` +
-          ` (EMA: ${s.ema200.toFixed(2)} ₺, ${s.pct.toFixed(2)}%)`
+          ` (EMA 200: ${s.ema200.toFixed(2)} ₺, ${s.pct.toFixed(2)}%)`
       );
     }
     lines.push("");
