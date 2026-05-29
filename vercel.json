@@ -3,18 +3,11 @@
     {
       "path": "/api/cron",
       "schedule": "5 7 * * 1-5"
-    },
-    {
-      "path": "/api/news",
-      "schedule": "10 7 * * 1-5"
     }
   ],
   "functions": {
     "app/api/cron/route.ts": {
       "maxDuration": 300
-    },
-    "app/api/news/route.ts": {
-      "maxDuration": 60
     }
   }
 }
