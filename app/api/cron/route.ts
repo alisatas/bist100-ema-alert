@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { BIST100 } from "@/lib/bist100";
-import { getWeeklyCloses, getCurrentPrice, getFundamentals, type Fundamentals } from "@/lib/yahoo";
+import { getWeeklyCloses, getPriceInfo } from "@/lib/yahoo";
 import { getEMA200, getEMA50, calculateRSI, pctDiff } from "@/lib/ema";
 import { sendMessage } from "@/lib/telegram";
 import { buildMacroBrief } from "@/lib/macro";
@@ -22,15 +22,8 @@ interface StockResult {
   ema50: number | null;
   rsi: number | null;
   pct: number;
-  fundamentals: Fundamentals;
-}
-
-function fmtMarketCap(cap: number | null): string {
-  if (!cap) return "—";
-  if (cap >= 1e12) return `${(cap / 1e12).toFixed(1)}T₺`;
-  if (cap >= 1e9) return `${(cap / 1e9).toFixed(1)}B₺`;
-  if (cap >= 1e6) return `${(cap / 1e6).toFixed(0)}M₺`;
-  return `${cap}₺`;
+  week52High: number | null;
+  week52Low: number | null;
 }
 
 function rsiLabel(rsi: number | null): string {
@@ -42,14 +35,12 @@ function rsiLabel(rsi: number | null): string {
   return `${rsi} 🔥 Aşırı Alım`;
 }
 
-function ema50Label(price: number, ema50: number | null, ema200: number): string {
+function crossLabel(ema50: number | null, ema200: number): string {
   if (!ema50) return "—";
-  const pos50 = price > ema50 ? "üstünde" : "altında";
-  const cross = ema50 > ema200 ? "✅ Altın Kesişim" : "⚠️ Ölüm Kesişimi";
-  return `${ema50.toFixed(2)}₺ (fiyat EMA50 ${pos50}) — ${cross}`;
+  return ema50 > ema200 ? "✅ Altın Kesişim" : "⚠️ Ölüm Kesişimi";
 }
 
-// Returns one analysis string per stock, in the same order as input
+// Returns one AI comment per stock, same order as input
 async function buildStockAnalyses(stocks: StockResult[], date: string): Promise<string[]> {
   if (stocks.length === 0) return [];
 
@@ -57,33 +48,35 @@ async function buildStockAnalyses(stocks: StockResult[], date: string): Promise<
 
   const stockData = stocks.map((s, i) => {
     const ticker = s.symbol.replace(".IS", "");
-    const direction = s.pct >= 0 ? "EMA200 üstünde" : "EMA200 altında";
-    const cross = s.ema50 ? (s.ema50 > s.ema200 ? "Altın Kesişim (boğa)" : "Ölüm Kesişimi (ayı)") : "EMA50 yok";
+    const dir = s.pct >= 0 ? "üstünde" : "altında";
+    const range = s.week52High && s.week52Low
+      ? `${s.week52Low.toFixed(2)}₺ – ${s.week52High.toFixed(2)}₺`
+      : "—";
     return [
       `#${i + 1} ${ticker} (${s.name})`,
-      `Fiyat: ${s.price.toFixed(2)}₺ — ${direction} (${s.pct.toFixed(2)}%)`,
-      `EMA200: ${s.ema200.toFixed(2)}₺ | EMA50: ${s.ema50?.toFixed(2) ?? "—"}₺ | Kesişim: ${cross}`,
-      `RSI(14 haftalık): ${s.rsi ?? "—"}`,
-      `F/K: ${s.fundamentals.peRatio?.toFixed(1) ?? "—"} | PD/DD: ${s.fundamentals.pbRatio?.toFixed(2) ?? "—"} | PD: ${fmtMarketCap(s.fundamentals.marketCap)}`,
-      `52H: ${s.fundamentals.week52Low?.toFixed(2) ?? "—"}₺ – ${s.fundamentals.week52High?.toFixed(2) ?? "—"}₺`,
+      `Haftalık EMA200: ${s.ema200.toFixed(2)}₺ | Fiyat: ${s.price.toFixed(2)}₺ (EMA200 ${dir}, ${s.pct.toFixed(2)}%)`,
+      `RSI(14 haftalık): ${s.rsi ?? "—"} | EMA50/EMA200 kesişimi: ${crossLabel(s.ema50, s.ema200)}`,
+      `52 haftalık aralık: ${range}`,
     ].join("\n");
   }).join("\n\n");
 
   try {
     const msg = await client.messages.create({
       model: "claude-sonnet-4-6",
-      max_tokens: 1800,
-      system: `Sen BIST uzmanı kıdemli bir portföy yöneticisisin. CEO'ya sabah raporu hazırlarsın.
-Her hisse için kısa, net, aksiyon odaklı Türkçe yorum yaz. Teknik ve temel verileri birleştir.`,
+      max_tokens: 1600,
+      system: `Sen BIST uzmanı portföy yöneticisisin. CEO'ya kısa, net, aksiyon odaklı Türkçe rapor yazarsın.`,
       messages: [{
         role: "user",
-        content: `Bugün (${date}) haftalık EMA 200'e dokunan BIST hisseleri:
+        content: `Bugün (${date}) haftalık EMA 200 seviyesine dokunan BIST hisseleri:
 
 ${stockData}
 
-Her hisse için SADECE şu formatı yaz, hisseler arasını ---SEP--- ile ayır, başka hiçbir şey ekleme:
+Önemli: Bu hisseler haftalık EMA 200'e dokunuyor — bu kritik bir destek/direnç seviyesidir.
+Her hisse için EMA 200 seviyesinin önemi üzerinden yorum yap.
 
-⚡ <i>Yorum:</i> [RSI durumu, EMA kesişimi ve değerlemeyi birleştiren 2-3 cümle. Net aksiyon önerisi.]
+Her hisse için SADECE şu format, hisseler arasında ---SEP---:
+
+⚡ <i>EMA200 Yorumu:</i> [EMA200 seviyesinde ne oluyor? RSI bunu nasıl destekliyor/çürütüyor? 52H aralığında nerede? Yatırımcı ne yapmalı? 2-3 cümle.]
 
 ---SEP---`,
       }],
@@ -91,7 +84,6 @@ Her hisse için SADECE şu formatı yaz, hisseler arasını ---SEP--- ile ayır,
 
     const raw = msg.content[0].type === "text" ? msg.content[0].text : "";
     const parts = raw.split("---SEP---").map((s) => s.trim()).filter(Boolean);
-    // Pad with empty strings if Claude returned fewer than expected
     while (parts.length < stocks.length) parts.push("");
     return parts.slice(0, stocks.length);
   } catch (err) {
@@ -116,10 +108,9 @@ export async function GET(req: NextRequest) {
   const date = new Date().toLocaleDateString("tr-TR", { day: "numeric", month: "long", year: "numeric" });
 
   // 1. Sabah brifing
-  const macroBrief = await buildMacroBrief(date);
-  await sendMessage(macroBrief);
+  await sendMessage(await buildMacroBrief(date));
 
-  // 2. BIST 100 Haftalık EMA 200 taraması
+  // 2. BIST 100 haftalık EMA 200 taraması
   const results: StockResult[] = [];
   const errors: string[] = [];
 
@@ -139,17 +130,22 @@ export async function GET(req: NextRequest) {
         const ema200 = getEMA200(closes);
         if (!ema200) return;
 
-        const price = await getCurrentPrice(symbol);
-        if (!price) { errors.push(`${symbol}: fiyat alınamadı`); return; }
+        const info = await getPriceInfo(symbol);
+        if (!info) { errors.push(`${symbol}: fiyat alınamadı`); return; }
 
-        const pct = pctDiff(price, ema200);
+        const pct = pctDiff(info.price, ema200);
         if (Math.abs(pct) > TOUCH_THRESHOLD_PCT) return;
 
-        const ema50 = getEMA50(closes);
-        const rsi = calculateRSI(closes);
-        const fundamentals = await getFundamentals(symbol);
-
-        results.push({ symbol, name, price, ema200, ema50, rsi, pct, fundamentals });
+        results.push({
+          symbol, name,
+          price: info.price,
+          ema200,
+          ema50: getEMA50(closes),
+          rsi: calculateRSI(closes),
+          pct,
+          week52High: info.week52High,
+          week52Low: info.week52Low,
+        });
       })
     );
 
@@ -163,10 +159,10 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ scanned: BIST100.length, touching: 0, errors: errors.length ? errors : undefined });
   }
 
-  // 3. AI analizi — her hisse için ayrı yorum
+  // 3. AI analizi
   const analyses = await buildStockAnalyses(results, date);
 
-  // 4. Mesaj formatı — her hissenin altında teknik+temel+AI yorum birlikte
+  // 4. Mesaj
   const lines: string[] = [
     `📊 <b>BIST 100 Haftalık EMA 200 Taraması</b> — ${date}`,
     `🎯 ${results.length} hisse EMA 200'e dokunuyor (±%${TOUCH_THRESHOLD_PCT})`,
@@ -177,10 +173,12 @@ export async function GET(req: NextRequest) {
     const s = results[i];
     const ticker = s.symbol.replace(".IS", "");
     const dir = s.pct >= 0 ? "🔼" : "🔽";
+    const range = s.week52High && s.week52Low
+      ? `${s.week52Low.toFixed(2)}₺ – ${s.week52High.toFixed(2)}₺`
+      : "—";
     lines.push(`${dir} <b>${ticker}</b> — ${s.price.toFixed(2)}₺ | EMA200: ${s.ema200.toFixed(2)}₺ (${s.pct >= 0 ? "+" : ""}${s.pct.toFixed(2)}%)`);
-    lines.push(`   📊 RSI: ${rsiLabel(s.rsi)}`);
-    lines.push(`   📉 EMA50: ${ema50Label(s.price, s.ema50, s.ema200)}`);
-    lines.push(`   💼 F/K: ${s.fundamentals.peRatio?.toFixed(1) ?? "—"} | PD/DD: ${s.fundamentals.pbRatio?.toFixed(2) ?? "—"} | PD: ${fmtMarketCap(s.fundamentals.marketCap)}`);
+    lines.push(`   📊 RSI: ${rsiLabel(s.rsi)} | ${crossLabel(s.ema50, s.ema200)}`);
+    lines.push(`   📉 52H: ${range}`);
     if (analyses[i]) lines.push(`   ${analyses[i]}`);
     lines.push("");
   }

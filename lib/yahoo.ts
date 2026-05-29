@@ -60,11 +60,32 @@ export async function getWeeklyCloses(symbol: string, weeks = 250): Promise<numb
   }
 }
 
+export interface PriceInfo {
+  price: number;
+  week52High: number | null;
+  week52Low: number | null;
+}
+
 export async function getCurrentPrice(symbol: string): Promise<number | null> {
   try {
     const data = await fetchChart(symbol, "1d", "5d");
     const result = data?.chart.result?.[0];
     return result?.meta.regularMarketPrice ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export async function getPriceInfo(symbol: string): Promise<PriceInfo | null> {
+  try {
+    const data = await fetchChart(symbol, "1d", "5d");
+    const meta = data?.chart.result?.[0]?.meta;
+    if (!meta) return null;
+    return {
+      price: meta.regularMarketPrice,
+      week52High: meta.fiftyTwoWeekHigh ?? null,
+      week52Low: meta.fiftyTwoWeekLow ?? null,
+    };
   } catch {
     return null;
   }
