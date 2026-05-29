@@ -49,24 +49,25 @@ function ema50Label(price: number, ema50: number | null, ema200: number): string
   return `${ema50.toFixed(2)}₺ (fiyat EMA50 ${pos50}) — ${cross}`;
 }
 
-async function buildStockAnalysis(stocks: StockResult[], date: string): Promise<string> {
-  if (stocks.length === 0) return "";
+// Returns one analysis string per stock, in the same order as input
+async function buildStockAnalyses(stocks: StockResult[], date: string): Promise<string[]> {
+  if (stocks.length === 0) return [];
 
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-  const stockData = stocks.map((s) => {
+  const stockData = stocks.map((s, i) => {
     const ticker = s.symbol.replace(".IS", "");
     const direction = s.pct >= 0 ? "EMA200 üstünde" : "EMA200 altında";
     const cross = s.ema50 ? (s.ema50 > s.ema200 ? "Altın Kesişim (boğa)" : "Ölüm Kesişimi (ayı)") : "EMA50 yok";
     return [
-      `HİSSE: ${ticker} (${s.name})`,
+      `#${i + 1} ${ticker} (${s.name})`,
       `Fiyat: ${s.price.toFixed(2)}₺ — ${direction} (${s.pct.toFixed(2)}%)`,
       `EMA200: ${s.ema200.toFixed(2)}₺ | EMA50: ${s.ema50?.toFixed(2) ?? "—"}₺ | Kesişim: ${cross}`,
       `RSI(14 haftalık): ${s.rsi ?? "—"}`,
-      `F/K: ${s.fundamentals.peRatio?.toFixed(1) ?? "—"} | PD/DD: ${s.fundamentals.pbRatio?.toFixed(2) ?? "—"} | Piyasa Değeri: ${fmtMarketCap(s.fundamentals.marketCap)}`,
-      `52H Aralığı: ${s.fundamentals.week52Low?.toFixed(2) ?? "—"}₺ – ${s.fundamentals.week52High?.toFixed(2) ?? "—"}₺`,
+      `F/K: ${s.fundamentals.peRatio?.toFixed(1) ?? "—"} | PD/DD: ${s.fundamentals.pbRatio?.toFixed(2) ?? "—"} | PD: ${fmtMarketCap(s.fundamentals.marketCap)}`,
+      `52H: ${s.fundamentals.week52Low?.toFixed(2) ?? "—"}₺ – ${s.fundamentals.week52High?.toFixed(2) ?? "—"}₺`,
     ].join("\n");
-  }).join("\n\n---\n\n");
+  }).join("\n\n");
 
   try {
     const msg = await client.messages.create({
@@ -80,18 +81,22 @@ Her hisse için kısa, net, aksiyon odaklı Türkçe yorum yaz. Teknik ve temel 
 
 ${stockData}
 
-Her hisse için şu formatı kullan (başka hiçbir şey ekleme):
+Her hisse için SADECE şu formatı yaz, hisseler arasını ---SEP--- ile ayır, başka hiçbir şey ekleme:
 
-🔵 <b>[TICKER] — [isim]</b> | [yön emoji] [pct]%
-⚡ <i>Yorum:</i> [Teknik ve temel verileri harmanlayan 2-3 cümle. RSI durumu, EMA kesişimi, değerleme ne söylüyor? Yatırımcı ne yapmalı?]
+⚡ <i>Yorum:</i> [RSI durumu, EMA kesişimi ve değerlemeyi birleştiren 2-3 cümle. Net aksiyon önerisi.]
 
-(her hisse arasında boş satır)`,
+---SEP---`,
       }],
     });
-    return msg.content[0].type === "text" ? msg.content[0].text : "";
+
+    const raw = msg.content[0].type === "text" ? msg.content[0].text : "";
+    const parts = raw.split("---SEP---").map((s) => s.trim()).filter(Boolean);
+    // Pad with empty strings if Claude returned fewer than expected
+    while (parts.length < stocks.length) parts.push("");
+    return parts.slice(0, stocks.length);
   } catch (err) {
     console.error("Claude analysis error:", err);
-    return "";
+    return stocks.map(() => "");
   }
 }
 
@@ -158,30 +163,26 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ scanned: BIST100.length, touching: 0, errors: errors.length ? errors : undefined });
   }
 
-  // 3. AI analizi
-  const aiAnalysis = await buildStockAnalysis(results, date);
+  // 3. AI analizi — her hisse için ayrı yorum
+  const analyses = await buildStockAnalyses(results, date);
 
-  // 4. Mesaj formatı — ham veri + AI yorum
+  // 4. Mesaj formatı — her hissenin altında teknik+temel+AI yorum birlikte
   const lines: string[] = [
     `📊 <b>BIST 100 Haftalık EMA 200 Taraması</b> — ${date}`,
     `🎯 ${results.length} hisse EMA 200'e dokunuyor (±%${TOUCH_THRESHOLD_PCT})`,
     "",
   ];
 
-  for (const s of results) {
+  for (let i = 0; i < results.length; i++) {
+    const s = results[i];
     const ticker = s.symbol.replace(".IS", "");
     const dir = s.pct >= 0 ? "🔼" : "🔽";
     lines.push(`${dir} <b>${ticker}</b> — ${s.price.toFixed(2)}₺ | EMA200: ${s.ema200.toFixed(2)}₺ (${s.pct >= 0 ? "+" : ""}${s.pct.toFixed(2)}%)`);
-    lines.push(`   RSI: ${rsiLabel(s.rsi)} | EMA50: ${ema50Label(s.price, s.ema50, s.ema200)}`);
-    lines.push(`   F/K: ${s.fundamentals.peRatio?.toFixed(1) ?? "—"} | PD/DD: ${s.fundamentals.pbRatio?.toFixed(2) ?? "—"} | PD: ${fmtMarketCap(s.fundamentals.marketCap)}`);
+    lines.push(`   📊 RSI: ${rsiLabel(s.rsi)}`);
+    lines.push(`   📉 EMA50: ${ema50Label(s.price, s.ema50, s.ema200)}`);
+    lines.push(`   💼 F/K: ${s.fundamentals.peRatio?.toFixed(1) ?? "—"} | PD/DD: ${s.fundamentals.pbRatio?.toFixed(2) ?? "—"} | PD: ${fmtMarketCap(s.fundamentals.marketCap)}`);
+    if (analyses[i]) lines.push(`   ${analyses[i]}`);
     lines.push("");
-  }
-
-  if (aiAnalysis) {
-    lines.push("─────────────────────");
-    lines.push("🤖 <b>AI Analizi:</b>");
-    lines.push("");
-    lines.push(aiAnalysis);
   }
 
   await sendMessage(lines.join("\n"));
