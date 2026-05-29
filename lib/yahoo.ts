@@ -73,7 +73,8 @@ export async function getCurrentPrice(symbol: string): Promise<number | null> {
 export async function getFundamentals(symbol: string): Promise<Fundamentals> {
   const empty: Fundamentals = { peRatio: null, pbRatio: null, marketCap: null, week52High: null, week52Low: null, epsTrailing: null };
   try {
-    const url = `${SUMMARY_BASE}/${encodeURIComponent(symbol)}?modules=summaryDetail,defaultKeyStatistics`;
+    // v7/quote returns flat fields including trailingPE, marketCap, priceToBook for BIST stocks
+    const url = `https://query2.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(symbol)}&fields=trailingPE,priceToBook,marketCap,fiftyTwoWeekHigh,fiftyTwoWeekLow,epsTrailingTwelveMonths`;
     const res = await fetch(url, {
       headers: { ...HEADERS, Referer: `https://finance.yahoo.com/quote/${symbol}/` },
       cache: "no-store",
@@ -81,17 +82,15 @@ export async function getFundamentals(symbol: string): Promise<Fundamentals> {
     if (!res.ok) return empty;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const data: any = await res.json();
-    const r = data?.quoteSummary?.result?.[0];
-    if (!r) return empty;
-    const sd = r.summaryDetail ?? {};
-    const ks = r.defaultKeyStatistics ?? {};
+    const q = data?.quoteResponse?.result?.[0];
+    if (!q) return empty;
     return {
-      peRatio: sd.trailingPE?.raw ?? null,
-      pbRatio: ks.priceToBook?.raw ?? null,
-      marketCap: sd.marketCap?.raw ?? null,
-      week52High: sd.fiftyTwoWeekHigh?.raw ?? null,
-      week52Low: sd.fiftyTwoWeekLow?.raw ?? null,
-      epsTrailing: ks.trailingEps?.raw ?? null,
+      peRatio: q.trailingPE ?? null,
+      pbRatio: q.priceToBook ?? null,
+      marketCap: q.marketCap ?? null,
+      week52High: q.fiftyTwoWeekHigh ?? null,
+      week52Low: q.fiftyTwoWeekLow ?? null,
+      epsTrailing: q.epsTrailingTwelveMonths ?? null,
     };
   } catch {
     return empty;
